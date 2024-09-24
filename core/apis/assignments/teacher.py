@@ -1,8 +1,10 @@
 from flask import Blueprint
 from core import db
 from core.apis import decorators
-from core.apis.responses import APIResponse
+from core.apis.responses import APIResponse,StatusCodeResponse
 from core.models.assignments import Assignment
+from flask import request
+import json
 
 from .schema import AssignmentSchema, AssignmentGradeSchema
 teacher_assignments_resources = Blueprint('teacher_assignments_resources', __name__)
@@ -11,10 +13,18 @@ teacher_assignments_resources = Blueprint('teacher_assignments_resources', __nam
 @teacher_assignments_resources.route('/assignments', methods=['GET'], strict_slashes=False)
 @decorators.authenticate_principal
 def list_assignments(p):
-    """Returns list of assignments"""
-    teachers_assignments = Assignment.get_assignments_by_teacher()
+    """Returns list of assignments for a specific teacher"""
+    
+    principal_header = request.headers.get('X-Principal')
+    principal_data = json.loads(principal_header)
+    teacher_id = principal_data.get('teacher_id')
+    
+    teachers_assignments = Assignment.get_assignments_by_teacher(teacher_id=teacher_id)
+
     teachers_assignments_dump = AssignmentSchema().dump(teachers_assignments, many=True)
+    
     return APIResponse.respond(data=teachers_assignments_dump)
+
 
 
 @teacher_assignments_resources.route('/assignments/grade', methods=['POST'], strict_slashes=False)
@@ -22,7 +32,21 @@ def list_assignments(p):
 @decorators.authenticate_principal
 def grade_assignment(p, incoming_payload):
     """Grade an assignment"""
-    grade_assignment_payload = AssignmentGradeSchema().load(incoming_payload)
+    assignment= AssignmentGradeSchema().load(incoming_payload)
+    grade_assignment_payload = Assignment.query.get(assignment.id)
+    
+    principal_header = request.headers.get('X-Principal')
+    principal_data = json.loads(principal_header)
+    teacher_id = principal_data.get('teacher_id')
+    
+    if grade_assignment_payload is None:
+        return StatusCodeResponse.respond(404)
+    
+    if grade_assignment_payload.state == "DRAFT":
+        return StatusCodeResponse.respond(400)
+    
+    if grade_assignment_payload.teacher_id!=teacher_id:
+        return StatusCodeResponse.respond(400) 
 
     graded_assignment = Assignment.mark_grade(
         _id=grade_assignment_payload.id,
